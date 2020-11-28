@@ -9,7 +9,7 @@ from requests.packages.urllib3.poolmanager import PoolManager
 import ssl
 import csv
 import re
-
+from json import loads
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -249,13 +249,56 @@ def get_city_info(city):
     return [population, square]
 
 
+def get_sber_market_retailers(city):
+    request = requests.get('https://sbermarket.ru/')
+    soup = bs4.BeautifulSoup(request.text, 'lxml')
+    slug = None
+    json = loads(soup.find('div', {'data-react-class': "HomeLanding"}).get('data-react-props'))
+    for i in json.get('pageProps').get('cities'):
+        if i.get('name') == city:
+            slug = i.get('slug')
+
+    url = f"https://sbermarket.ru/cities/{slug}"
+    headers = CaseInsensitiveDict()
+    headers["authority"] = "sbermarket.ru"
+    headers["cache-control"] = "max-age=0"
+    headers["upgrade-insecure-requests"] = "1"
+    headers[
+        "user-agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36"
+    headers[
+        "accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9"
+    headers["sec-fetch-site"] = "same-origin"
+    headers["sec-fetch-mode"] = "navigate"
+    headers["sec-fetch-user"] = "?1"
+    headers["sec-fetch-dest"] = "document"
+    headers["referer"] = "https://sbermarket.ru/cities/arhangelsk"
+    headers["accept-language"] = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7,la;q=0.6"
+    request = requests.get(url, headers=headers)
+
+    count = 0
+    if request.status_code == 200:
+        soup = bs4.BeautifulSoup(request.text, 'lxml')
+        count = len(soup.find_all('div', {'class': 'description_37VdV'}))
+    else:
+        pass
+
+    return count
+
+
 cats = ['Город', 'Личные вещи', 'Транспорт', 'Для дома и дачи', 'Хобби и отдых', 'Бытовая электроника',
         'Работа', 'Услуги', 'Готовый бизнес и оборудование', 'Всего объявлений по выбранным категориям',
         'Всего объявлений']
 line = ['Город', 'Количество пунктов выдачи']
 line_it = ['Город', 'Количество ИТ-компаний']
 line_info = ['Город', 'Население', 'Площадь']
+line_sber = ['Город', 'Количество компаний, сотрудничающи со Сбер-Маркет']
 cities = ['Магадан', 'Екатеринбург', 'Волгоград', 'Сочи', 'Сургут', 'Краснодар']
+
+csv_writer('sber_reatilers', [line_sber])
+
+for i in cities:
+    data = get_sber_market_retailers(i)
+    csv_writer('sber_reatilers', [[i, data]])
 
 # csv_writer('cities_info', [line_info])
 #
