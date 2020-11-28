@@ -8,6 +8,8 @@ from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.poolmanager import PoolManager
 import ssl
 import csv
+import re
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -35,7 +37,7 @@ class MyAdapter(HTTPAdapter):
 
 
 try:
-    urllib3.util.ssl_.DEFAULT_CIPHERS = 'Ciphers)'
+    urllib3.util.ssl_.DEFAULT_CIPHERS = my_ciphers
 except:
     raise exit(0)
 
@@ -48,7 +50,16 @@ def make_request(url):
         return session.get(url)
 
 
+def make_request_yandex(url, params, headers):
+    with requests.session() as session:
+        session.mount('https://', MyAdapter())
+        session.headers = headers
+        session.verify = False
+        return session.get(url, params=params)
+
+
 api_key = 'cb408d30-83d7-41b8-85c9-d6a544d1c64d'
+api_key_org = 'ece3dc91-6a21-4460-875c-430ae25ea3f3'
 
 headers_avito = CaseInsensitiveDict()
 headers_avito["authority"] = "www.avito.ru"
@@ -60,7 +71,6 @@ headers_avito["content-type"] = "application/json"
 headers_avito["sec-fetch-site"] = "same-origin"
 headers_avito["referer"] = "https://www.avito.ru/moskva"
 headers_avito["accept-language"] = "ru-RU,ru;q=0.9"
-
 
 headers_youla = CaseInsensitiveDict()
 headers_youla["Connection"] = "keep-alive"
@@ -75,12 +85,26 @@ headers_youla["Sec-Fetch-Dest"] = "empty"
 headers_youla["Referer"] = "https://youla.ru/"
 headers_youla["Accept-Language"] = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7,la;q=0.6"
 
+headers_ozon = CaseInsensitiveDict()
+headers_ozon["authority"] = "www.ozon.ru"
+headers_ozon["accept"] = "application/json"
+headers_ozon["x-o3-app-name"] = "dweb_client"
+headers_ozon["$x-o3-app-version"] = "hotfix_20-10'-'2020_3bb97afd"
+headers_ozon[
+    "user-agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.66 Safari/537.36"
+headers_ozon["sec-fetch-site"] = "same-origin"
+headers_ozon["sec-fetch-mode"] = "cors"
+headers_ozon["sec-fetch-dest"] = "empty"
+headers_ozon["referer"] = "https://www.ozon.ru/"
+headers_ozon["accept-language"] = "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7,la;q=0.6"
+
 
 def get_coordinates(city):
     url = 'https://geocode-maps.yandex.ru/1.x/'
     params = (
         ('apikey', api_key),
         ('geocode', city),
+        # ('format', 'json')
     )
     request = requests.get(url, params=params)
     json = xmltodict.parse(request.text, process_namespaces=True)
@@ -152,7 +176,7 @@ def get_total_by_cats_avito(city):
 
 def get_location_id_youla(city):
     city_encoded = quote(city)
-    url = "https://api.youla.io/api/v1/mapsme/suggest?app_id=web%2F2&uid=5fc1711b18b04&timestamp=1606512959490&q=%D0%BF%D1%81%D0%BA%D0%BE%D0%B2&format=json&rank=4&limit=10"
+    url = f"https://api.youla.io/api/v1/mapsme/suggest?app_id=web%2F2&uid=5fc1711b18b04&timestamp=1606512959490&q={city_encoded}&format=json&rank=4&limit=10"
 
     request = requests.get(url, headers=headers_youla)
     json = request.json()
@@ -164,12 +188,94 @@ def get_location_id_youla(city):
 
     return city_id
 
-get_location_id_youla('Псков')
 
-# cats = ['Город', 'Личные вещи', 'Транспорт', 'Для дома и дачи', 'Хобби и отдых', 'Бытовая электроника',
-#         'Работа', 'Услуги', 'Готовый бизнес и оборудование', 'Всего объявлений по выбранным категориям',
-#         'Всего объявлений']
-# cities = ['Магадан', 'Екатеринбург', 'Волгоград', 'Сочи', 'Сургут', 'Краснодар']
+def get_location_id(city):
+    city_encoded = quote(city)
+    url = f"https://www.ozon.ru/api/location/v2/search?query={city_encoded}"
+
+    request = requests.get(url, headers=headers_ozon)
+    json = request.json()
+    city_id = None
+    for i in json:
+        if city in i['name']:
+            city_id = i['areaId']
+            break
+
+    return city_id
+
+
+def get_pickups_ozon(city):
+    city_id = get_location_id(city)
+    url = f'https://www.ozon.ru/api/composer-api.bx/_action/cmsGetPvzV2?areaID={city_id}'
+
+    request = requests.get(url, headers=headers_ozon)
+    json = request.json()
+    return len(json['pvzs'])
+
+
+def get_it_comp_by_city(city):
+    url = 'https://search-maps.yandex.ru/v1/'
+    params = (
+        ('apikey', api_key_org),
+        ('text', f'IT-компания, {city}'),
+        ('lang', 'ru_RU'),
+        ('format', 'json'),
+        ('results', 500)
+    )
+    count = 0
+    skip = 0
+    request = requests.get(url, params=params)
+    json = request.json()
+    while len(json['features']) != 0:
+        skip += 500
+        count += len(json['features'])
+        request = requests.get(url + f'?skip={skip}', params=params)
+        if request.status_code == 200:
+            json = request.json()
+        else:
+            break
+
+    return count
+
+
+def get_city_info(city):
+    url = f'https://ru.wikipedia.org/wiki/{quote(city)}'
+    request = requests.get(url)
+    soup = bs4.BeautifulSoup(request.text, 'lxml')
+    population = soup.find('span', {'data-wikidata-property-id': 'P1082'}).text.strip().split('[')[0]
+    population = ''.join(re.findall('\d+', population))
+    square = soup.find('span', {'data-wikidata-property-id': 'P2046'}).text.strip().split('[')[0]
+    square = ''.join(re.findall('\d+', square))
+    return [population, square]
+
+
+cats = ['Город', 'Личные вещи', 'Транспорт', 'Для дома и дачи', 'Хобби и отдых', 'Бытовая электроника',
+        'Работа', 'Услуги', 'Готовый бизнес и оборудование', 'Всего объявлений по выбранным категориям',
+        'Всего объявлений']
+line = ['Город', 'Количество пунктов выдачи']
+line_it = ['Город', 'Количество ИТ-компаний']
+line_info = ['Город', 'Население', 'Площадь']
+cities = ['Магадан', 'Екатеринбург', 'Волгоград', 'Сочи', 'Сургут', 'Краснодар']
+
+# csv_writer('cities_info', [line_info])
+#
+# for i in cities:
+#     data = get_city_info(i)
+#     csv_writer('cities_info', [[i] + data])
+
+# csv_writer('ozon_pickups', [line])
+#
+# for i in cities:
+#     data = get_pickups_ozon(i)
+#     csv_writer('ozon_pickups', [[i, data]])
+
+# csv_writer('it_companies', [line])
+#
+# for i in cities:
+#     data = get_it_comp_by_city(i)
+#     csv_writer('it_companies', [[i, data]])
+
+
 # csv_writer('avito', [cats])
 # for i in cities:
 #     data = get_total_by_cats_avito(i)
